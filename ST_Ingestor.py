@@ -23,9 +23,26 @@ class Ingestor:
         if regen_vehicles:
             self._initialize_vehicles_table()
     
-    def _create_table(self, sql_command):
+    def _execute_sql(self, sql_command):
         connection = sqlite3.connect(self._sqlite_db)
         cursor = connection.cursor()
+        cursor.execute(sql_command)
+        connection.commit()
+        connection.close()
+
+    def _populate_table_write(self, table_name, dataset_fields, dataset):
+        sql_command = """INSERT INTO {} ('{}') VALUES ({}?);""".format(table_name, "','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
+        connection = sqlite3.connect(self._sqlite_db)
+        cursor = connection.cursor()
+        for row in dataset_list:
+            cursor.execute(sql_command, tuple(row))
+        connection.commit()
+        connection.close()
+
+    def _drop_table(self, table_name):
+        connection = sqlite3.connect(self._sqlite_db)
+        cursor = connection.cursor()
+        sql_command = 'DROP TABLE {};'.format(table_name)
         cursor.execute(sql_command)
         connection.commit()
         connection.close()
@@ -44,14 +61,6 @@ class Ingestor:
         self._trip_updates = [tu for tu in self._feed.entity if tu.HasField('trip_update')]
         self._vehicles = [tu for tu in self._feed.entity if tu.HasField('vehicle')]
         self._header = self._feed.header
-        
-    def _drop_table(self, table_name):
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
-        sql_command = 'DROP TABLE {};'.format(table_name)
-        cursor.execute(sql_command)
-        connection.commit()
-        connection.close()
         
     def _initialize_stops_table(self):
         try:
@@ -74,7 +83,7 @@ class Ingestor:
         location_type TEXT NOT NULL,
         parent_station TEXT,
         update_ts TEXT NOT NULL);"""
-        self._create_table(sql_command)
+        self._execute_sql(sql_command)
 
     def _populate_stops_table(self):
         url = urllib.urlopen(self._static_data_url)
@@ -96,17 +105,8 @@ class Ingestor:
         'update_ts': self._stops_update_ts} for row in reader]
         dataset_fields = ['stop_id', 'stop_code', 'stop_name', 'stop_desc', 'stop_lat', 'stop_lon', 
         'zone_id', 'stop_url', 'location_type', 'parent_station', 'update_ts']
-        sql_command = """INSERT INTO stops ('{}') VALUES ({}?);""".format("','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
         dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
-        self._populate_table_write(sql_command, dataset_list)
-
-    def _populate_table_write(self, sql_command, dataset_list):
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
-        for row in dataset_list:
-            cursor.execute(sql_command, tuple(row))
-        connection.commit()
-        connection.close()
+        self._populate_table_write('stops', dataset_fields, dataset_list)
 
     def update_stops_table(self):
         self._initialize_stops_table()
@@ -131,7 +131,7 @@ class Ingestor:
         status_update_time INTEGER NOT NULL,
         load_ts INTEGER NOT NULL,
         update_ts TEXT NOT NULL);"""
-        self._create_table(sql_command)
+        self._execute_sql(sql_command)
 
     def _populate_vehicles_table(self):
         def wrap_text(s): return s if s else None
@@ -147,9 +147,8 @@ class Ingestor:
         'update_ts': self._feed_update_ts} for entity in self._vehicles]
         dataset_fields = ['entity_id', 'trip_id', 'trip_start_date', 'route_id', 'current_stop_sequence',
         'current_status', 'status_update_time', 'load_ts', 'update_ts']
-        sql_command = """INSERT INTO vehicles ('{}') VALUES ({}?);""".format("','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
         dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
-        self._populate_table_write(sql_command, dataset_list)
+        self._populate_table_write(vehicles, dataset_fields, dataset_list)
 
     def _initialize_trip_updates_table(self):
         try:
@@ -172,7 +171,7 @@ class Ingestor:
         departure_time INTEGER,
         load_ts INTEGER NOT NULL,
         update_ts TEXT NOT NULL);"""
-        self._create_table(sql_command)
+        self._execute_sql(sql_command)
 
     def _populate_trip_updates_table(self):
         def wrap_text(s): return s if s else None
@@ -190,9 +189,8 @@ class Ingestor:
         'update_ts': self._feed_update_ts} for entity in self._trip_updates for stu in entity.trip_update.stop_time_update]
         dataset_fields = ['entity_id', 'trip_id', 'trip_start_date', 'route_id', 'stop_id',
         'direction_id', 'schedule_relationship', 'arrival_time', 'departure_time', 'load_ts', 'update_ts']
-        sql_command = """INSERT INTO trip_updates ('{}') VALUES ({}?);""".format("','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
         dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
-        self._populate_table_write(sql_command, dataset_list)
+        self._populate_table_write('trip_updates', dataset_fields, dataset_list)
 
     def update_feed_tables(self, feed_ids, replace = False):
         if replace:
@@ -214,9 +212,5 @@ class Ingestor:
 
     def _clean_feed_table(self):
         oldest_record = time.time() - self._persist_limit
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
-        cursor.execute('DELETE FROM trip_updates WHERE load_ts < ?', (oldest_record,))
-        cursor.execute('DELETE FROM vehicles WHERE load_ts < ?', (oldest_record,))
-        connection.commit()
-        connection.close()
+        self._execute_sql('DELETE FROM trip_updates WHERE load_ts < ?', (oldest_record,))
+        self._execute_sql('DELETE FROM vehicles WHERE load_ts < ?', (oldest_record,))
