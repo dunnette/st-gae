@@ -23,6 +23,13 @@ class Ingestor:
         if regen_vehicles:
             self._initialize_vehicles_table()
     
+    def _create_table(self, sql_command):
+        connection = sqlite3.connect(self._sqlite_db)
+        cursor = connection.cursor()
+        cursor.execute(sql_command)
+        connection.commit()
+        connection.close()
+
     def _initialize_feed(self, feed_id):
         self._load_feed(feed_id)
         self._split_feed()
@@ -54,8 +61,6 @@ class Ingestor:
         self._create_stops_table()
     
     def _create_stops_table(self):
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
         sql_command = """
         CREATE TABLE stops ( 
         stop_id TEXT NOT NULL,
@@ -69,48 +74,40 @@ class Ingestor:
         location_type TEXT NOT NULL,
         parent_station TEXT,
         update_ts TEXT NOT NULL);"""
-        cursor.execute(sql_command)
-        connection.commit()
-        connection.close()
-    
+        self._create_table(sql_command)
+
     def _populate_stops_table(self):
         url = urllib.urlopen(self._static_data_url)
         f = StringIO.StringIO(url.read())
         reader = csv.DictReader(zipfile.ZipFile(f).open('stops.txt'))
         self._stops_update_ts = datetime.datetime.now()
         def wrap_text(s): return s if s else None
+        dataset = [{
+        'stop_id': wrap_text(row['stop_id']),
+        'stop_code': wrap_text(row['stop_code']),
+        'stop_name': wrap_text(row['stop_name']),
+        'stop_desc': wrap_text(row['stop_desc']),
+        'stop_lat': wrap_text(row['stop_lat']),
+        'stop_lon': wrap_text(row['stop_lon']),
+        'zone_id': wrap_text(row['zone_id']),
+        'stop_url': wrap_text(row['stop_url']),
+        'location_type': wrap_text(row['location_type']),
+        'parent_station': wrap_text(row['parent_station']),
+        'update_ts': self._stops_update_ts} for row in reader]
+        dataset_fields = ['stop_id', 'stop_code', 'stop_name', 'stop_desc', 'stop_lat', 'stop_lon', 
+        'zone_id', 'stop_url', 'location_type', 'parent_station', 'update_ts']
+        sql_command = """INSERT INTO stops ('{}') VALUES ({}?);""".format("','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
+        dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
+        self._populate_table_write(sql_command, dataset_list)
+
+    def _populate_table_write(self, sql_command, dataset_list):
         connection = sqlite3.connect(self._sqlite_db)
         cursor = connection.cursor()
-        for row in reader:
-            sql_command = """INSERT INTO stops (
-            stop_id,
-            stop_code,
-            stop_name,
-            stop_desc,
-            stop_lat,
-            stop_lon,
-            zone_id,
-            stop_url,
-            location_type,
-            parent_station,
-            update_ts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"""
-            args = (
-                wrap_text(row['stop_id']),
-                wrap_text(row['stop_code']),
-                wrap_text(row['stop_name']),
-                wrap_text(row['stop_desc']),
-                wrap_text(row['stop_lat']),
-                wrap_text(row['stop_lon']),
-                wrap_text(row['zone_id']),
-                wrap_text(row['stop_url']),
-                wrap_text(row['location_type']),
-                wrap_text(row['parent_station']),
-                self._stops_update_ts)
-            cursor.execute(sql_command, args)
+        for row in dataset_list:
+            cursor.execute(sql_command, tuple(row))
         connection.commit()
         connection.close()
-        
+
     def update_stops_table(self):
         self._initialize_stops_table()
         self._populate_stops_table()
@@ -123,8 +120,6 @@ class Ingestor:
         self._create_vehicles_table()
         
     def _create_vehicles_table(self):
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
         sql_command = """
         CREATE TABLE vehicles ( 
         entity_id INTEGER NOT NULL, 
@@ -136,39 +131,25 @@ class Ingestor:
         status_update_time INTEGER NOT NULL,
         load_ts INTEGER NOT NULL,
         update_ts TEXT NOT NULL);"""
-        cursor.execute(sql_command)
-        connection.commit()
-        connection.close()
-        
+        self._create_table(sql_command)
+
     def _populate_vehicles_table(self):
         def wrap_text(s): return s if s else None
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
-        for entity in self._vehicles:
-            sql_command = """INSERT INTO vehicles (
-            entity_id, 
-            trip_id, 
-            trip_start_date, 
-            route_id, 
-            current_stop_sequence, 
-            current_status, 
-            status_update_time, 
-            load_ts, 
-            update_ts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"""
-            args = (
-                wrap_text(entity.id), 
-                wrap_text(entity.vehicle.trip.trip_id),
-                wrap_text(datetime.datetime.strptime(entity.vehicle.trip.start_date,'%Y%m%d')),
-                wrap_text(entity.vehicle.trip.route_id), 
-                entity.vehicle.current_stop_sequence, 
-                entity.vehicle.current_status, 
-                wrap_text(entity.vehicle.timestamp),
-                self._header.timestamp,
-                self._feed_update_ts)
-            cursor.execute(sql_command, args)
-        connection.commit()
-        connection.close()
+        dataset = [{
+        'entity_id': wrap_text(entity.id), 
+        'trip_id': wrap_text(entity.vehicle.trip.trip_id),
+        'trip_start_date': wrap_text(datetime.datetime.strptime(entity.vehicle.trip.start_date,'%Y%m%d')),
+        'route_id': wrap_text(entity.vehicle.trip.route_id), 
+        'current_stop_sequence': entity.vehicle.current_stop_sequence, 
+        'current_status': entity.vehicle.current_status, 
+        'status_update_time': wrap_text(entity.vehicle.timestamp),
+        'load_ts': self._header.timestamp,
+        'update_ts': self._feed_update_ts} for entity in self._vehicles]
+        dataset_fields = ['entity_id', 'trip_id', 'trip_start_date', 'route_id', 'current_stop_sequence',
+        'current_status', 'status_update_time', 'load_ts', 'update_ts']
+        sql_command = """INSERT INTO vehicles ('{}') VALUES ({}?);""".format("','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
+        dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
+        self._populate_table_write(sql_command, dataset_list)
 
     def _initialize_trip_updates_table(self):
         try:
@@ -178,8 +159,6 @@ class Ingestor:
         self._create_trip_updates_table()
             
     def _create_trip_updates_table(self):
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
         sql_command = """
         CREATE TABLE trip_updates ( 
         entity_id INTEGER NOT NULL, 
@@ -193,44 +172,27 @@ class Ingestor:
         departure_time INTEGER,
         load_ts INTEGER NOT NULL,
         update_ts TEXT NOT NULL);"""
-        cursor.execute(sql_command)
-        connection.commit()
-        connection.close()
-        
+        self._create_table(sql_command)
+
     def _populate_trip_updates_table(self):
         def wrap_text(s): return s if s else None
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
-        for entity in self._trip_updates:
-            for stu in entity.trip_update.stop_time_update:
-                sql_command = """INSERT INTO trip_updates (
-                entity_id, 
-                trip_id, 
-                trip_start_date, 
-                route_id, 
-                stop_id, 
-                direction_id, 
-                schedule_relationship, 
-                arrival_time, 
-                departure_time, 
-                load_ts, 
-                update_ts
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"""
-                args = (
-                    wrap_text(entity.id),
-                    wrap_text(entity.trip_update.trip.trip_id),
-                    wrap_text(datetime.datetime.strptime(entity.trip_update.trip.start_date,'%Y%m%d')),
-                    wrap_text(entity.trip_update.trip.route_id), 
-                    wrap_text(stu.stop_id),
-                    wrap_text(stu.stop_id[-1]), 
-                    stu.schedule_relationship, 
-                    wrap_text(stu.arrival.time), 
-                    wrap_text(stu.departure.time),
-                    self._header.timestamp,
-                    self._feed_update_ts)
-                cursor.execute(sql_command, args)
-        connection.commit()
-        connection.close()
+        dataset = [{
+        'entity_id': wrap_text(entity.id),
+        'trip_id': wrap_text(entity.trip_update.trip.trip_id),
+        'trip_start_date': wrap_text(datetime.datetime.strptime(entity.trip_update.trip.start_date,'%Y%m%d')),
+        'route_id': wrap_text(entity.trip_update.trip.route_id), 
+        'stop_id': wrap_text(stu.stop_id),
+        'direction_id': wrap_text(stu.stop_id[-1]), 
+        'schedule_relationship': stu.schedule_relationship, 
+        'arrival_time': wrap_text(stu.arrival.time), 
+        'departure_time': wrap_text(stu.departure.time),
+        'load_ts': self._header.timestamp,
+        'update_ts': self._feed_update_ts} for entity in self._trip_updates for stu in entity.trip_update.stop_time_update]
+        dataset_fields = ['entity_id', 'trip_id', 'trip_start_date', 'route_id', 'stop_id',
+        'direction_id', 'schedule_relationship', 'arrival_time', 'departure_time', 'load_ts', 'update_ts']
+        sql_command = """INSERT INTO trip_updates ('{}') VALUES ({}?);""".format("','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
+        dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
+        self._populate_table_write(sql_command, dataset_list)
 
     def update_feed_tables(self, feed_ids, replace = False):
         if replace:
