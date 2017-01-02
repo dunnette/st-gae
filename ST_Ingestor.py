@@ -39,13 +39,13 @@ class Ingestor:
         connection.commit()
         connection.close()
 
+    def _create_table(self, table_name, table_structure):
+        sql_command = 'CREATE TABLE {} ({});'.format(table_name,','.join([' '.join(e) for e in table_structure]))
+        self._execute_sql(sql_command)
+
     def _drop_table(self, table_name):
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
         sql_command = 'DROP TABLE {};'.format(table_name)
-        cursor.execute(sql_command)
-        connection.commit()
-        connection.close()
+        self._execute_sql(sql_command)
 
     def _initialize_feed(self, feed_id):
         self._load_feed(feed_id)
@@ -70,20 +70,20 @@ class Ingestor:
         self._create_stops_table()
     
     def _create_stops_table(self):
-        sql_command = """
-        CREATE TABLE stops ( 
-        stop_id TEXT NOT NULL,
-        stop_code TEXT,
-        stop_name TEXT NOT NULL,
-        stop_desc TEXT,
-        stop_lat REAL NOT NULL,
-        stop_lon REAL NOT NULL,
-        zone_id TEXT,
-        stop_url TEXT,
-        location_type TEXT NOT NULL,
-        parent_station TEXT,
-        update_ts TEXT NOT NULL);"""
-        self._execute_sql(sql_command)
+        table_structure = [
+        ['stop_id',        'TEXT', 'NOT NULL'],
+        ['stop_code',      'TEXT'            ],
+        ['stop_name',      'TEXT', 'NOT NULL'],
+        ['stop_desc',      'TEXT'            ],
+        ['stop_lat',       'REAL', 'NOT NULL'],
+        ['stop_lon',       'REAL', 'NOT NULL'],
+        ['zone_id',        'TEXT'            ],
+        ['stop_url',       'TEXT'            ],
+        ['location_type',  'TEXT', 'NOT NULL'],
+        ['parent_station', 'TEXT'            ],
+        ['update_ts',      'TEXT', 'NOT NULL']
+        ]
+        self._create_table('stops', table_structure)
 
     def _populate_stops_table(self):
         url = urllib.urlopen(self._static_data_url)
@@ -120,18 +120,18 @@ class Ingestor:
         self._create_vehicles_table()
         
     def _create_vehicles_table(self):
-        sql_command = """
-        CREATE TABLE vehicles ( 
-        entity_id INTEGER NOT NULL, 
-        trip_id TEXT NOT NULL, 
-        trip_start_date TEXT NOT NULL, 
-        route_id TEXT NOT NULL, 
-        current_stop_sequence INTEGER NOT NULL,
-        current_status INTEGER NOT NULL,
-        status_update_time INTEGER NOT NULL,
-        load_ts INTEGER NOT NULL,
-        update_ts TEXT NOT NULL);"""
-        self._execute_sql(sql_command)
+        table_structure = [
+        ['entity_id',             'INTEGER', 'NOT NULL'], 
+        ['trip_id',               'TEXT',    'NOT NULL'], 
+        ['trip_start_date',       'TEXT',    'NOT NULL'], 
+        ['route_id',              'TEXT',    'NOT NULL'], 
+        ['current_stop_sequence', 'INTEGER', 'NOT NULL'],
+        ['current_status',        'INTEGER', 'NOT NULL'],
+        ['status_update_time',    'INTEGER', 'NOT NULL'],
+        ['load_ts',               'INTEGER', 'NOT NULL'],
+        ['update_ts',             'TEXT',    'NOT NULL']
+        ]
+        self._create_table('vehicles',table_structure)
 
     def _populate_vehicles_table(self):
         def wrap_text(s): return s if s else None
@@ -158,20 +158,20 @@ class Ingestor:
         self._create_trip_updates_table()
             
     def _create_trip_updates_table(self):
-        sql_command = """
-        CREATE TABLE trip_updates ( 
-        entity_id INTEGER NOT NULL, 
-        trip_id TEXT NOT NULL, 
-        trip_start_date TEXT NOT NULL, 
-        route_id TEXT NOT NULL, 
-        stop_id TEXT NOT NULL,
-        direction_id TEXT NOT NULL,
-        schedule_relationship INTEGER NOT NULL,
-        arrival_time INTEGER,
-        departure_time INTEGER,
-        load_ts INTEGER NOT NULL,
-        update_ts TEXT NOT NULL);"""
-        self._execute_sql(sql_command)
+        table_structure = [
+        ['entity_id',             'INTEGER', 'NOT NULL'], 
+        ['trip_id',               'TEXT',    'NOT NULL'], 
+        ['trip_start_date',       'TEXT',    'NOT NULL'], 
+        ['route_id',              'TEXT',    'NOT NULL'],
+        ['stop_id',               'TEXT',    'NOT NULL'],
+        ['direction_id',          'TEXT',    'NOT NULL'],
+        ['schedule_relationship', 'INTEGER', 'NOT NULL'],
+        ['arrival_time',          'INTEGER'            ],
+        ['departure_time',        'INTEGER'            ],
+        ['load_ts',               'INTEGER', 'NOT NULL'],
+        ['update_ts',             'TEXT',    'NOT NULL']
+        ]
+        self._create_table('trip_updates',table_structure)
 
     def _populate_trip_updates_table(self):
         def wrap_text(s): return s if s else None
