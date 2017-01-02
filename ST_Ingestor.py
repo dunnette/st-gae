@@ -16,6 +16,7 @@ class Ingestor:
     
     def __init__(self, key_str, regen_stops = False, regen_trip_updates = False, regen_vehicles = False):
         self._key_str = key_str
+        self._define_tables()
         if regen_stops:
             self._initialize_stops_table()
         if regen_trip_updates:
@@ -23,6 +24,23 @@ class Ingestor:
         if regen_vehicles:
             self._initialize_vehicles_table()
     
+    def _define_tables(self):
+        def wrap_text(s): return s if s else None
+        self.table_definitions = {
+        'trip_updates': {'name': 'trip_updates', 'n': 11, 'def': {
+        0:  {'n': 'entity_id',             't': ['entity_id',             'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.id)}, 
+        1:  {'n': 'trip_id',               't': ['trip_id',               'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.trip_update.trip.trip_id)}, 
+        2:  {'n': 'trip_start_date',       't': ['trip_start_date',       'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(datetime.datetime.strptime(e.trip_update.trip.start_date,'%Y%m%d'))}, 
+        3:  {'n': 'route_id',              't': ['route_id',              'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.trip_update.trip.route_id)}, 
+        4:  {'n': 'stop_id',               't': ['stop_id',               'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(s.stop_id)}, 
+        5:  {'n': 'direction_id',          't': ['direction_id',          'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(s.stop_id[-1])}, 
+        6:  {'n': 'schedule_relationship', 't': ['schedule_relationship', 'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): s.schedule_relationship}, 
+        7:  {'n': 'arrival_time',          't': ['arrival_time',          'INTEGER'            ], 'f': lambda (e, s, sf): wrap_text(s.arrival.time)}, 
+        8:  {'n': 'departure_time',        't': ['departure_time',        'INTEGER'            ], 'f': lambda (e, s, sf): wrap_text(s.departure.time)}, 
+        9:  {'n': 'load_ts',               't': ['load_ts',               'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(sf._header.timestamp)}, 
+        10: {'n': 'update_ts',             't': ['update_ts',             'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(sf._feed_update_ts)}, 
+        }}}
+
     def _execute_sql(self, sql_command, arg = ''):
         connection = sqlite3.connect(self._sqlite_db)
         cursor = connection.cursor()
@@ -158,29 +176,16 @@ class Ingestor:
         self._create_trip_updates_table()
             
     def _create_trip_updates_table(self):
-        def wrap_text(s): return s if s else None
-        self.table_dict = {
-        0:  {'table': ['entity_id',             'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.id)}, 
-        1:  {'table': ['trip_id',               'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.trip_update.trip.trip_id)}, 
-        2:  {'table': ['trip_start_date',       'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(datetime.datetime.strptime(e.trip_update.trip.start_date,'%Y%m%d'))}, 
-        3:  {'table': ['route_id',              'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.trip_update.trip.route_id)}, 
-        4:  {'table': ['stop_id',               'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(s.stop_id)}, 
-        5:  {'table': ['direction_id',          'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(s.stop_id[-1])}, 
-        6:  {'table': ['schedule_relationship', 'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): s.schedule_relationship}, 
-        7:  {'table': ['arrival_time',          'INTEGER'            ], 'f': lambda (e, s, sf): wrap_text(s.arrival.time)}, 
-        8:  {'table': ['departure_time',        'INTEGER'            ], 'f': lambda (e, s, sf): wrap_text(s.departure.time)}, 
-        9:  {'table': ['load_ts',               'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(sf._header.timestamp)}, 
-        10: {'table': ['update_ts',             'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(sf._feed_update_ts)}, 
-        }
-        table_structure = [self.table_dict[ii]['table'] for ii in range(11)]
+        table_def = self.table_definitions['trip_updates']
+        table_structure = [table_def['def'][ii]['t'] for ii in range(table_def['n'])]
         self._create_table('trip_updates',table_structure)
 
     def _populate_trip_updates_table(self):
-        dataset = [{self.table_dict[ii]['table'][0]: self.table_dict[ii]['f']((entity,stu,self)) for ii in range(11)
-        } for entity in self._trip_updates for stu in entity.trip_update.stop_time_update]
-        dataset_fields = [self.table_dict[ii]['table'][0] for ii in range(11)]
-        dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
-        self._populate_table_write('trip_updates', dataset_fields, dataset_list)
+        table_def = self.table_definitions['trip_updates']
+        dataset = [[table_def['def'][ii]['f']((entity,stu,self)) for ii in range(table_def['n'])] 
+                    for entity in self._trip_updates for stu in entity.trip_update.stop_time_update]
+        dataset_fields = [table_def['def'][ii]['n'] for ii in range(table_def['n'])]
+        self._populate_table_write('trip_updates', dataset_fields, dataset)
 
     def update_feed_tables(self, feed_ids, replace = False):
         if replace:
