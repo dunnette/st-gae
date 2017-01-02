@@ -23,10 +23,10 @@ class Ingestor:
         if regen_vehicles:
             self._initialize_vehicles_table()
     
-    def _execute_sql(self, sql_command):
+    def _execute_sql(self, sql_command, arg = ''):
         connection = sqlite3.connect(self._sqlite_db)
         cursor = connection.cursor()
-        cursor.execute(sql_command)
+        cursor.execute(sql_command, arg)
         connection.commit()
         connection.close()
 
@@ -34,7 +34,7 @@ class Ingestor:
         sql_command = """INSERT INTO {} ('{}') VALUES ({}?);""".format(table_name, "','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
         connection = sqlite3.connect(self._sqlite_db)
         cursor = connection.cursor()
-        for row in dataset_list:
+        for row in dataset:
             cursor.execute(sql_command, tuple(row))
         connection.commit()
         connection.close()
@@ -148,7 +148,7 @@ class Ingestor:
         dataset_fields = ['entity_id', 'trip_id', 'trip_start_date', 'route_id', 'current_stop_sequence',
         'current_status', 'status_update_time', 'load_ts', 'update_ts']
         dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
-        self._populate_table_write(vehicles, dataset_fields, dataset_list)
+        self._populate_table_write('vehicles', dataset_fields, dataset_list)
 
     def _initialize_trip_updates_table(self):
         try:
@@ -212,5 +212,5 @@ class Ingestor:
 
     def _clean_feed_table(self):
         oldest_record = time.time() - self._persist_limit
-        self._execute_sql('DELETE FROM trip_updates WHERE load_ts < ?', (oldest_record,))
-        self._execute_sql('DELETE FROM vehicles WHERE load_ts < ?', (oldest_record,))
+        self._execute_sql('DELETE FROM trip_updates WHERE load_ts < ?', arg = (oldest_record,))
+        self._execute_sql('DELETE FROM vehicles WHERE load_ts < ?', arg = (oldest_record,))
