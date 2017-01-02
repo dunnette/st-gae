@@ -158,37 +158,27 @@ class Ingestor:
         self._create_trip_updates_table()
             
     def _create_trip_updates_table(self):
-        table_structure = [
-        ['entity_id',             'INTEGER', 'NOT NULL'], 
-        ['trip_id',               'TEXT',    'NOT NULL'], 
-        ['trip_start_date',       'TEXT',    'NOT NULL'], 
-        ['route_id',              'TEXT',    'NOT NULL'],
-        ['stop_id',               'TEXT',    'NOT NULL'],
-        ['direction_id',          'TEXT',    'NOT NULL'],
-        ['schedule_relationship', 'INTEGER', 'NOT NULL'],
-        ['arrival_time',          'INTEGER'            ],
-        ['departure_time',        'INTEGER'            ],
-        ['load_ts',               'INTEGER', 'NOT NULL'],
-        ['update_ts',             'TEXT',    'NOT NULL']
-        ]
+        def wrap_text(s): return s if s else None
+        self.table_dict = {
+        0:  {'table': ['entity_id',             'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.id)}, 
+        1:  {'table': ['trip_id',               'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.trip_update.trip.trip_id)}, 
+        2:  {'table': ['trip_start_date',       'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(datetime.datetime.strptime(e.trip_update.trip.start_date,'%Y%m%d'))}, 
+        3:  {'table': ['route_id',              'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(e.trip_update.trip.route_id)}, 
+        4:  {'table': ['stop_id',               'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(s.stop_id)}, 
+        5:  {'table': ['direction_id',          'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(s.stop_id[-1])}, 
+        6:  {'table': ['schedule_relationship', 'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): s.schedule_relationship}, 
+        7:  {'table': ['arrival_time',          'INTEGER'            ], 'f': lambda (e, s, sf): wrap_text(s.arrival.time)}, 
+        8:  {'table': ['departure_time',        'INTEGER'            ], 'f': lambda (e, s, sf): wrap_text(s.departure.time)}, 
+        9:  {'table': ['load_ts',               'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(sf._header.timestamp)}, 
+        10: {'table': ['update_ts',             'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(sf._feed_update_ts)}, 
+        }
+        table_structure = [self.table_dict[ii]['table'] for ii in range(11)]
         self._create_table('trip_updates',table_structure)
 
     def _populate_trip_updates_table(self):
-        def wrap_text(s): return s if s else None
-        dataset = [{
-        'entity_id': wrap_text(entity.id),
-        'trip_id': wrap_text(entity.trip_update.trip.trip_id),
-        'trip_start_date': wrap_text(datetime.datetime.strptime(entity.trip_update.trip.start_date,'%Y%m%d')),
-        'route_id': wrap_text(entity.trip_update.trip.route_id), 
-        'stop_id': wrap_text(stu.stop_id),
-        'direction_id': wrap_text(stu.stop_id[-1]), 
-        'schedule_relationship': stu.schedule_relationship, 
-        'arrival_time': wrap_text(stu.arrival.time), 
-        'departure_time': wrap_text(stu.departure.time),
-        'load_ts': self._header.timestamp,
-        'update_ts': self._feed_update_ts} for entity in self._trip_updates for stu in entity.trip_update.stop_time_update]
-        dataset_fields = ['entity_id', 'trip_id', 'trip_start_date', 'route_id', 'stop_id',
-        'direction_id', 'schedule_relationship', 'arrival_time', 'departure_time', 'load_ts', 'update_ts']
+        dataset = [{self.table_dict[ii]['table'][0]: self.table_dict[ii]['f']((entity,stu,self)) for ii in range(11)
+        } for entity in self._trip_updates for stu in entity.trip_update.stop_time_update]
+        dataset_fields = [self.table_dict[ii]['table'][0] for ii in range(11)]
         dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
         self._populate_table_write('trip_updates', dataset_fields, dataset_list)
 
@@ -213,4 +203,4 @@ class Ingestor:
     def _clean_feed_table(self):
         oldest_record = time.time() - self._persist_limit
         self._execute_sql('DELETE FROM trip_updates WHERE load_ts < ?', arg = (oldest_record,))
-        self._execute_sql('DELETE FROM vehicles WHERE load_ts < ?', arg = (oldest_record,))
+        self._execute_sql('DELETE FROM vehicles     WHERE load_ts < ?', arg = (oldest_record,))
