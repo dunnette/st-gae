@@ -99,35 +99,32 @@ class Ingestor:
         sql_command = 'DELETE FROM {} WHERE load_ts < ?'.format(table_name)
         self._execute_sql(sql_command, args = [(oldest_record,)])
 
-    def _initialize_feed(self, feed_id):
-        self._load_feed(feed_id)
-        self._split_feed()
-    
-    def _load_feed(self, feed_id_int):
-        payload  = urllib.urlencode({'key': self._key_str, 'feed_id': feed_id_int})
-        response = urllib.urlopen('{}?{}'.format(self._endpoint_url, payload))
-        self._feed = gtfs_realtime_pb2.FeedMessage()
-        self._feed.ParseFromString(response.read())
-        
-    def _split_feed(self):
-        self._trip_updates = [tu for tu in self._feed.entity if tu.HasField('trip_update')]
-        self._vehicles = [tu for tu in self._feed.entity if tu.HasField('vehicle')]
-        self._header = self._feed.header
-
-    def _populate_stops_table(self):
+    def _initialize_stops(self):
         url = urllib.urlopen(self._static_data_url)
         f = StringIO.StringIO(url.read())
-        reader = csv.DictReader(zipfile.ZipFile(f).open('stops.txt'))
-        self._stops_update_ts = datetime.datetime.now()
+        self._stops = csv.DictReader(zipfile.ZipFile(f).open('stops.txt'))
+
+    def _populate_stops_table(self):
         table_def = self._table_definitions['stops']
         dataset = [[table_def['def'][ii]['f']((row, self)) for ii in range(table_def['n'])] 
-                    for row in reader]
+                    for row in self._stops]
         dataset_fields = [table_def['def'][ii]['n'] for ii in range(table_def['n'])]
         self._populate_table('stops', dataset_fields, dataset)
 
     def update_stops_table(self):
+        self._stops_update_ts = datetime.datetime.now()
         self._initialize_table('stops')
+        self._initialize_stops()
         self._populate_stops_table()
+
+    def _initialize_feed(self, feed_id):
+        payload  = urllib.urlencode({'key': self._key_str, 'feed_id': feed_id})
+        response = urllib.urlopen('{}?{}'.format(self._endpoint_url, payload))
+        self._feed = gtfs_realtime_pb2.FeedMessage()
+        self._feed.ParseFromString(response.read())
+        self._trip_updates = [tu for tu in self._feed.entity if tu.HasField('trip_update')]
+        self._vehicles = [tu for tu in self._feed.entity if tu.HasField('vehicle')]
+        self._header = self._feed.header
 
     def _populate_vehicles_table(self):
         table_def = self._table_definitions['vehicles']
@@ -143,12 +140,17 @@ class Ingestor:
         dataset_fields = [table_def['def'][ii]['n'] for ii in range(table_def['n'])]
         self._populate_table('trip_updates', dataset_fields, dataset)
 
+    def _clean_feed_table(self):
+        oldest_record = time.time() - self._persist_limit
+        self._delete_records('trip_updates', oldest_record)
+        self._delete_records('vehicles', oldest_record)
+
     def update_feed_tables(self, feed_ids, replace = False):
         if replace:
             del self._header
             self._initialize_table('vehicles')
             self._initialize_table('trip_updates')
-        if self.is_feed_stale():
+        if hasattr(self, '_header') and time.time() - self._header.timestamp < self._feed_freq:
             pass
         else:
             self._feed_update_ts = datetime.datetime.now()
@@ -157,11 +159,3 @@ class Ingestor:
                 self._populate_vehicles_table()
                 self._populate_trip_updates_table()
             self._clean_feed_table()
-
-    def is_feed_stale(self):
-        return hasattr(self, '_header') and time.time() - self._header.timestamp < self._feed_freq
-
-    def _clean_feed_table(self):
-        oldest_record = time.time() - self._persist_limit
-        self._delete_records('trip_updates', oldest_record)
-        self._delete_records('vehicles', oldest_record)
