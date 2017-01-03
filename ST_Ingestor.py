@@ -8,11 +8,11 @@ import csv
 import sqlite3
 
 class Ingestor:
-    _endpoint_url = 'http://datamine.mta.info/mta_esi.php'
+    _endpoint_url    = 'http://datamine.mta.info/mta_esi.php'
     _static_data_url = 'http://web.mta.info/developers/data/nyct/subway/google_transit.zip'
-    _sqlite_db = 'subway_status.db'
-    _feed_freq = 60
-    _persist_limit = 5*60
+    _sqlite_db       = 'subway_status.db'
+    _feed_freq       = 60
+    _persist_limit   = 5*60
     
     def __init__(self, key_str, regen_stops = False, regen_trip_updates = False, regen_vehicles = False):
         self._key_str = key_str
@@ -40,7 +40,7 @@ class Ingestor:
         9:  {'n': 'load_ts',               't': ['load_ts',               'INTEGER', 'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(sf._header.timestamp)}, 
         10: {'n': 'update_ts',             't': ['update_ts',             'TEXT',    'NOT NULL'], 'f': lambda (e, s, sf): wrap_text(sf._feed_update_ts)}, 
         }},
-        'vehicles': {'name': 'vehicles', 'n': 1, 'def': {
+        'vehicles': {'name': 'vehicles', 'n': 9, 'def': {
         0: {'n': 'entity_id',             't': ['entity_id',             'INTEGER', 'NOT NULL'], 'f': lambda (e, s): wrap_text(e.id)},
         1: {'n': 'trip_id',               't': ['trip_id',               'TEXT',    'NOT NULL'], 'f': lambda (e, s): wrap_text(e.vehicle.trip.trip_id)},
         2: {'n': 'trip_start_date',       't': ['trip_start_date',       'TEXT',    'NOT NULL'], 'f': lambda (e, s): wrap_text(datetime.datetime.strptime(e.vehicle.trip.start_date,'%Y%m%d'))},
@@ -51,7 +51,7 @@ class Ingestor:
         7: {'n': 'load_ts',               't': ['load_ts',               'INTEGER', 'NOT NULL'], 'f': lambda (e, s): s._header.timestamp},
         8: {'n': 'update_ts',             't': ['update_ts',             'TEXT',    'NOT NULL'], 'f': lambda (e, s): s._feed_update_ts}
         }},
-        'stops': {'name': 'stops', 'n': 1, 'def': {
+        'stops': {'name': 'stops', 'n': 11, 'def': {
         0:  {'n': 'stop_id',        't': ['stop_id',        'TEXT', 'NOT NULL'], 'f': lambda (r,s): wrap_text(r['stop_id'])},
         1:  {'n': 'stop_code',      't': ['stop_code',      'TEXT'            ], 'f': lambda (r,s): wrap_text(r['stop_code'])},
         2:  {'n': 'stop_name',      't': ['stop_name',      'TEXT', 'NOT NULL'], 'f': lambda (r,s): wrap_text(r['stop_name'])},
@@ -65,29 +65,32 @@ class Ingestor:
         10: {'n': 'update_ts',      't': ['update_ts',      'TEXT', 'NOT NULL'], 'f': lambda (r,s): s._stops_update_ts}
         }}}
 
-    def _execute_sql(self, sql_command, arg = ''):
+    def _execute_sql(self, sql_command, args = ['']):
         connection = sqlite3.connect(self._sqlite_db)
         cursor = connection.cursor()
-        cursor.execute(sql_command, arg)
+        for arg in args:
+            cursor.execute(sql_command, arg)
         connection.commit()
         connection.close()
 
-    def _populate_table_write(self, table_name, dataset_fields, dataset):
+    def _populate_table(self, table_name, dataset_fields, dataset):
         sql_command = """INSERT INTO {} ('{}') VALUES ({}?);""".format(table_name, "','".join(dataset_fields),'?,'*(len(dataset_fields)-1))
-        connection = sqlite3.connect(self._sqlite_db)
-        cursor = connection.cursor()
-        for row in dataset:
-            cursor.execute(sql_command, tuple(row))
-        connection.commit()
-        connection.close()
+        args = [tuple(row) for row in dataset]
+        self._execute_sql(sql_command, args)
 
-    def _create_table(self, table_name, table_structure):
+    def _create_table(self, table_name):
+        table_def = self._table_definitions[table_name]
+        table_structure = [table_def['def'][ii]['t'] for ii in range(table_def['n'])]
         sql_command = 'CREATE TABLE {} ({});'.format(table_name,','.join([' '.join(e) for e in table_structure]))
         self._execute_sql(sql_command)
 
     def _drop_table(self, table_name):
         sql_command = 'DROP TABLE {};'.format(table_name)
         self._execute_sql(sql_command)
+
+    def _delete_records(self, table_name, oldest_record):
+        sql_command = 'DELETE FROM {} WHERE load_ts < ?'.format(table_name)
+        self._execute_sql(sql_command, args = [(oldest_record,)])
 
     def _initialize_feed(self, feed_id):
         self._load_feed(feed_id)
@@ -109,46 +112,18 @@ class Ingestor:
             self._drop_table('stops')
         except:
             pass
-        self._create_stops_table()
-    
-    def _create_stops_table(self):
-        table_structure = [
-        ['stop_id',        'TEXT', 'NOT NULL'],
-        ['stop_code',      'TEXT'            ],
-        ['stop_name',      'TEXT', 'NOT NULL'],
-        ['stop_desc',      'TEXT'            ],
-        ['stop_lat',       'REAL', 'NOT NULL'],
-        ['stop_lon',       'REAL', 'NOT NULL'],
-        ['zone_id',        'TEXT'            ],
-        ['stop_url',       'TEXT'            ],
-        ['location_type',  'TEXT', 'NOT NULL'],
-        ['parent_station', 'TEXT'            ],
-        ['update_ts',      'TEXT', 'NOT NULL']
-        ]
-        self._create_table('stops', table_structure)
+        self._create_table('stops')
 
     def _populate_stops_table(self):
         url = urllib.urlopen(self._static_data_url)
         f = StringIO.StringIO(url.read())
         reader = csv.DictReader(zipfile.ZipFile(f).open('stops.txt'))
         self._stops_update_ts = datetime.datetime.now()
-        def wrap_text(s): return s if s else None
-        dataset = [{
-        'stop_id': wrap_text(row['stop_id']),
-        'stop_code': wrap_text(row['stop_code']),
-        'stop_name': wrap_text(row['stop_name']),
-        'stop_desc': wrap_text(row['stop_desc']),
-        'stop_lat': wrap_text(row['stop_lat']),
-        'stop_lon': wrap_text(row['stop_lon']),
-        'zone_id': wrap_text(row['zone_id']),
-        'stop_url': wrap_text(row['stop_url']),
-        'location_type': wrap_text(row['location_type']),
-        'parent_station': wrap_text(row['parent_station']),
-        'update_ts': self._stops_update_ts} for row in reader]
-        dataset_fields = ['stop_id', 'stop_code', 'stop_name', 'stop_desc', 'stop_lat', 'stop_lon', 
-        'zone_id', 'stop_url', 'location_type', 'parent_station', 'update_ts']
-        dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
-        self._populate_table_write('stops', dataset_fields, dataset_list)
+        table_def = self._table_definitions['stops']
+        dataset = [[table_def['def'][ii]['f']((row, self)) for ii in range(table_def['n'])] 
+                    for row in reader]
+        dataset_fields = [table_def['def'][ii]['n'] for ii in range(table_def['n'])]
+        self._populate_table('stops', dataset_fields, dataset)
 
     def update_stops_table(self):
         self._initialize_stops_table()
@@ -159,57 +134,28 @@ class Ingestor:
             self._drop_table('vehicles')
         except:
             pass
-        self._create_vehicles_table()
-        
-    def _create_vehicles_table(self):
-        table_structure = [
-        ['entity_id',             'INTEGER', 'NOT NULL'], 
-        ['trip_id',               'TEXT',    'NOT NULL'], 
-        ['trip_start_date',       'TEXT',    'NOT NULL'], 
-        ['route_id',              'TEXT',    'NOT NULL'], 
-        ['current_stop_sequence', 'INTEGER', 'NOT NULL'],
-        ['current_status',        'INTEGER', 'NOT NULL'],
-        ['status_update_time',    'INTEGER', 'NOT NULL'],
-        ['load_ts',               'INTEGER', 'NOT NULL'],
-        ['update_ts',             'TEXT',    'NOT NULL']
-        ]
-        self._create_table('vehicles',table_structure)
+        self._create_table('vehicles')
 
     def _populate_vehicles_table(self):
-        def wrap_text(s): return s if s else None
-        dataset = [{
-        'entity_id': wrap_text(entity.id), 
-        'trip_id': wrap_text(entity.vehicle.trip.trip_id),
-        'trip_start_date': wrap_text(datetime.datetime.strptime(entity.vehicle.trip.start_date,'%Y%m%d')),
-        'route_id': wrap_text(entity.vehicle.trip.route_id), 
-        'current_stop_sequence': entity.vehicle.current_stop_sequence, 
-        'current_status': entity.vehicle.current_status, 
-        'status_update_time': wrap_text(entity.vehicle.timestamp),
-        'load_ts': self._header.timestamp,
-        'update_ts': self._feed_update_ts} for entity in self._vehicles]
-        dataset_fields = ['entity_id', 'trip_id', 'trip_start_date', 'route_id', 'current_stop_sequence',
-        'current_status', 'status_update_time', 'load_ts', 'update_ts']
-        dataset_list = [[row[field] for field in dataset_fields] for row in dataset]
-        self._populate_table_write('vehicles', dataset_fields, dataset_list)
+        table_def = self._table_definitions['vehicles']
+        dataset = [[table_def['def'][ii]['f']((entity,self)) for ii in range(table_def['n'])] 
+                  for entity in self._vehicles]
+        dataset_fields = [table_def['def'][ii]['n'] for ii in range(table_def['n'])]
+        self._populate_table('vehicles', dataset_fields, dataset)
 
     def _initialize_trip_updates_table(self):
         try:
             self._drop_table('trip_updates')
         except:
             pass
-        self._create_trip_updates_table()
-            
-    def _create_trip_updates_table(self):
-        table_def = self._table_definitions['trip_updates']
-        table_structure = [table_def['def'][ii]['t'] for ii in range(table_def['n'])]
-        self._create_table('trip_updates',table_structure)
+        self._create_table('trip_updates')
 
     def _populate_trip_updates_table(self):
         table_def = self._table_definitions['trip_updates']
         dataset = [[table_def['def'][ii]['f']((entity,stu,self)) for ii in range(table_def['n'])] 
                     for entity in self._trip_updates for stu in entity.trip_update.stop_time_update]
         dataset_fields = [table_def['def'][ii]['n'] for ii in range(table_def['n'])]
-        self._populate_table_write('trip_updates', dataset_fields, dataset)
+        self._populate_table('trip_updates', dataset_fields, dataset)
 
     def update_feed_tables(self, feed_ids, replace = False):
         if replace:
@@ -231,5 +177,5 @@ class Ingestor:
 
     def _clean_feed_table(self):
         oldest_record = time.time() - self._persist_limit
-        self._execute_sql('DELETE FROM trip_updates WHERE load_ts < ?', arg = (oldest_record,))
-        self._execute_sql('DELETE FROM vehicles     WHERE load_ts < ?', arg = (oldest_record,))
+        self._delete_records('trip_updates', oldest_record)
+        self._delete_records('vehicles', oldest_record)
