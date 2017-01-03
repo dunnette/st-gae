@@ -18,11 +18,11 @@ class Ingestor:
         self._key_str = key_str
         self._define_tables()
         if regen_stops:
-            self._initialize_stops_table()
+            self._initialize_table('stops')
         if regen_trip_updates:
-            self._initialize_trip_updates_table()
+            self._initialize_table('trip_updates')
         if regen_vehicles:
-            self._initialize_vehicles_table()
+            self._initialize_table('vehicles')
     
     def _define_tables(self):
         def wrap_text(s): return s if s else None
@@ -65,6 +65,13 @@ class Ingestor:
         10: {'n': 'update_ts',      't': ['update_ts',      'TEXT', 'NOT NULL'], 'f': lambda (r,s): s._stops_update_ts}
         }}}
 
+    def _initialize_table(self, table_name):
+        try:
+            self._drop_table(table_name)
+        except:
+            pass
+        self._create_table(table_name)
+
     def _execute_sql(self, sql_command, args = ['']):
         connection = sqlite3.connect(self._sqlite_db)
         cursor = connection.cursor()
@@ -106,13 +113,6 @@ class Ingestor:
         self._trip_updates = [tu for tu in self._feed.entity if tu.HasField('trip_update')]
         self._vehicles = [tu for tu in self._feed.entity if tu.HasField('vehicle')]
         self._header = self._feed.header
-        
-    def _initialize_stops_table(self):
-        try:
-            self._drop_table('stops')
-        except:
-            pass
-        self._create_table('stops')
 
     def _populate_stops_table(self):
         url = urllib.urlopen(self._static_data_url)
@@ -126,15 +126,8 @@ class Ingestor:
         self._populate_table('stops', dataset_fields, dataset)
 
     def update_stops_table(self):
-        self._initialize_stops_table()
+        self._initialize_table('stops')
         self._populate_stops_table()
-    
-    def _initialize_vehicles_table(self):
-        try:
-            self._drop_table('vehicles')
-        except:
-            pass
-        self._create_table('vehicles')
 
     def _populate_vehicles_table(self):
         table_def = self._table_definitions['vehicles']
@@ -142,13 +135,6 @@ class Ingestor:
                   for entity in self._vehicles]
         dataset_fields = [table_def['def'][ii]['n'] for ii in range(table_def['n'])]
         self._populate_table('vehicles', dataset_fields, dataset)
-
-    def _initialize_trip_updates_table(self):
-        try:
-            self._drop_table('trip_updates')
-        except:
-            pass
-        self._create_table('trip_updates')
 
     def _populate_trip_updates_table(self):
         table_def = self._table_definitions['trip_updates']
@@ -160,8 +146,8 @@ class Ingestor:
     def update_feed_tables(self, feed_ids, replace = False):
         if replace:
             del self._header
-            self._initialize_vehicles_table()
-            self._initialize_trip_updates_table()
+            self._initialize_table('vehicles')
+            self._initialize_table('trip_updates')
         if self.is_feed_stale():
             pass
         else:
