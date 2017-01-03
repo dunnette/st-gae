@@ -5,9 +5,3 @@ threadsafe: yes
 handlers:
 - url: .*
   script: application.application
-
-libraries:
-- name: jinja2
-  version: "2.6"
-- name: markupsafe
-  version: "0.15"
